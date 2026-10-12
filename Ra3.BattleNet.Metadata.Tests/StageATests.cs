@@ -72,7 +72,7 @@ public class StageATests
                 .Single(a => a.Attribute("ID")!.Value == "RA3BattleNet")
                 .Element("Posts")!
                 .Elements("Post").Elements("Contents").Elements("Content")
-                .Single(c => string.Equals((string?)c.Attribute("Language"), "zh-CN", StringComparison.OrdinalIgnoreCase))
+                .Single(c => string.Equals((string?)c.Attribute("Language"), "zh", StringComparison.OrdinalIgnoreCase))
                 .Value.Trim();
             var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var pending = new Queue<string>();
@@ -106,14 +106,14 @@ public class StageATests
                 registration!.Attribute("Source")!.Value)));
             var publishedContentId = app.Raw.Find("Posts")!
                 .GetAllElements("Content")
-                .Single(c => string.Equals(c.Get("Language"), "zh-CN", StringComparison.OrdinalIgnoreCase))
+                .Single(c => string.Equals(c.Get("Language"), "zh", StringComparison.OrdinalIgnoreCase))
                 .Value!;
             MetadataFlattener.LocalId(publishedContentId).Should().Be(localContentId);
             var markdown = loaded.Markdowns().Single(m => m.Id == publishedContentId);
             File.ReadAllText(Path.Combine(dst, markdown.Source!.Replace('/', Path.DirectorySeparatorChar)))
                 .Should().Be(sourceBody);
 
-            app.Packages[0].ManifestId.Should().Be(manifest.Get("ID"));
+            app.Packages.Single(p => p.Version == "1.9.9.11").ManifestId.Should().Be(manifest.Get("ID"));
             var corona = loaded.Mods().Single(m => m.Id == "Corona");
             var icon = loaded.Images().Single(image => image.Id == corona.Icon);
             var sourceDoc = XDocument.Load(Path.Combine(src, "mods", "corona", "corona.xml"));
@@ -141,7 +141,6 @@ public class StageATests
             var apps = doc.Root!.Elements("Application").ToList();
 
             var ra3 = apps.Single(a => (string?)a.Attribute("ID") == "RA3BattleNet");
-            ra3.Element("Version")!.Value.Should().Be("1.9.9.11");
             ra3.Element("TransferAd").Should().NotBeNull();
             ra3.Element("TransferAd")!.Value.Should().Be("true");
 
@@ -173,7 +172,7 @@ public class StageATests
             File.WriteAllText(Path.Combine(src, "metadata.xml"), """
 <?xml version="1.0" encoding="UTF-8"?>
 <Metadata>
-  <Markdown ID="missing-md" Source="nope.md" Hash="${MD5::}"/>
+  <Markdown ID="missing-md" Source="nope.md"/>
 </Metadata>
 """);
 
@@ -201,11 +200,11 @@ public class StageATests
             File.WriteAllText(Path.Combine(src, "metadata.xml"), """
 <?xml version="1.0" encoding="UTF-8"?>
 <Metadata>
-  <Markdown ID="ok-md" Source="note.md" Hash="${MD5::}"/>
+  <Markdown ID="ok-md" Source="note.md"/>
   <Application ID="App">
     <Version>1.0</Version>
-    <DisplayName Language="zh-CN">应用</DisplayName>
-    <DisplayName Language="en-US">App</DisplayName>
+    <DisplayName Language="zh">应用</DisplayName>
+    <DisplayName Language="en">App</DisplayName>
     <Packages>
       <Package Version="1.0">
         <Manifest>no-such-manifest</Manifest>

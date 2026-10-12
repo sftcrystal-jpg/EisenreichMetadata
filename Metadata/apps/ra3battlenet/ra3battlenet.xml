@@ -9,11 +9,15 @@
     </Includes>
 
     <Application ID="RA3BattleNet">
-        <Version>1.9.9.11</Version>
-        <DisplayName Language="zh-CN">红警3战网</DisplayName>
-        <DisplayName Language="en-US">RA3 BattleNet</DisplayName>
+        <Version>1.9.9.12</Version>
+        <DisplayName Language="zh">红色警戒3战网服务</DisplayName>
+        <DisplayName Language="en">Ra3BattleNet</DisplayName>
         <TransferAd>true</TransferAd>
         <Packages>
+            <Package Version="1.9.9.12">
+                <ReleaseDate>2026-10-07</ReleaseDate>
+                <Manifest>manifest-1.9.9.12</Manifest>
+            </Package>
             <Package Version="1.9.9.11">
                 <ReleaseDate>2026-10-02</ReleaseDate>
                 <Manifest>manifest-1.9.9.11</Manifest>
@@ -22,21 +26,21 @@
         <Posts>
             <Post DateTime="2026-10-02T00:00:00+08:00">
                 <Titles>
-                    <Title Language="zh-CN">版本更新 1.9.9.11</Title>
-                    <Title Language="en-US">Update 1.9.9.11</Title>
+                    <Title Language="zh">版本更新 1.9.9.11</Title>
+                    <Title Language="en">Update 1.9.9.11</Title>
                 </Titles>
                 <Descriptions>
-                    <Description Language="zh-CN">初版测试。</Description>
-                    <Description Language="en-US">Initial test.</Description>
+                    <Description Language="zh">初版测试。</Description>
+                    <Description Language="en">Initial test.</Description>
                 </Descriptions>
                 <Contents>
-                    <Content Language="zh-CN">news-zh-1.9.9.11</Content>
-                    <Content Language="en-US">news-en-1.9.9.11</Content>
+                    <Content Language="zh">news-zh-1.9.9.11</Content>
+                    <Content Language="en">news-en-1.9.9.11</Content>
                 </Contents>
             </Post>
         </Posts>
     
-        <UpdateKind ID="RA3BattleNet" DisplayName="客户端程序" Current="1.9.9.11"
+        <UpdateKind ID="RA3BattleNet" DisplayName="客户端程序" Current="1.9.9.13"
                     BaseUrl="https://update.ra3battle.net/app/RA3BattleNet/"
                     FallbackBaseUrl="">
             <Updater Version="1.9.9.9"
@@ -57,6 +61,18 @@
                      Size="18283"
                      ReleaseDate="2026-10-02"
                      Commit="v1.9.9.11" />
+            <Updater Version="1.9.9.12"
+                     Source="https://update.ra3battle.net/app/RA3BattleNet/manifests/manifest-1.9.9.12.xml"
+                     Hash="CAD0392E2382C99586AB1D0F0BD82295"
+                     Size="67823"
+                     ReleaseDate="2026-10-07"
+                     Commit="v1.9.9.12" />
+            <Updater Version="1.9.9.13"
+                     Source="https://update.ra3battle.net/app/RA3BattleNet/manifests/manifest-1.9.9.13.xml"
+                     Hash="7474A0E1556F26AFE3615FD6A8824C34"
+                     Size="68069"
+                     ReleaseDate="2026-10-08"
+                     Commit="v1.9.9.13" />
         </UpdateKind>
 
     </Application>

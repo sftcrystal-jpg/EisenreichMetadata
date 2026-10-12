@@ -43,14 +43,14 @@ var manifest = MetadataBuilder.Load(leafUrl.AbsoluteUri).Find("Manifest")!.ToMan
 var posts = app!.Raw.Find("Posts");
 var firstPost = posts?.Children.FirstOrDefault(c => c.Name == "Post");
 var zhTitle = firstPost?.Find("Titles")?.Children
-    .FirstOrDefault(c => c.Name == "Title" && string.Equals(c.Get("Language"), "zh-CN", StringComparison.OrdinalIgnoreCase))
+    .FirstOrDefault(c => c.Name == "Title" && string.Equals(c.Get("Language"), "zh", StringComparison.OrdinalIgnoreCase))
     ?.Value;
 var zhDescription = firstPost?.Find("Descriptions")?.Children
-    .FirstOrDefault(c => c.Name == "Description" && string.Equals(c.Get("Language"), "zh-CN", StringComparison.OrdinalIgnoreCase))
+    .FirstOrDefault(c => c.Name == "Description" && string.Equals(c.Get("Language"), "zh", StringComparison.OrdinalIgnoreCase))
     ?.Value;
 var headImageId = firstPost?.Find("HeadImage")?.Value;   // 可选封面，指向已登记 Image 的完整 ID
 var zhContentId = firstPost?.Find("Contents")?.Children
-    .FirstOrDefault(c => c.Name == "Content" && string.Equals(c.Get("Language"), "zh-CN", StringComparison.OrdinalIgnoreCase))
+    .FirstOrDefault(c => c.Name == "Content" && string.Equals(c.Get("Language"), "zh", StringComparison.OrdinalIgnoreCase))
     ?.Value;
 
 // 友情链接只在该 Mod 自己的节点上，顺序与 XML 书写顺序一致。Base 与 Application 都没有 Links。
@@ -96,7 +96,7 @@ var plan = ManifestMountPlanner.Build(
 <cacheDir>/.sources/<scheme>/<host_port>/<path>     其他发布基的正文（小写 host；非默认端口写成 host_port）
 ```
 
-同目录还有 `.etag`（ETag、Last-Modified、规范化 URI、正文 SHA256）、`.uri`（该磁盘路径一次成型的归属地址）和写入过程中的 `.tmp`。`.tmp` 不当缓存读。校验器缺失或与正文摘要不一致时，正文仍可离线使用，下一次读取是无条件 GET；但同一磁盘路径一旦被另一个地址占用（`Apps/x.xml` 与 `apps/x.xml` 在 Windows 上就是这种情况），正文既不会被误读，也不会被覆盖——即使 `.etag` 被删掉，`.uri` 仍保留归属。`SchemaVersion` 与 `MetadataSchema.IsCompatible` 不一致时不覆盖已有正文。
+同目录还有 `.etag`（ETag、Last-Modified、规范化 URI、正文 SHA256）、`.uri`（该磁盘路径一次成型的归属地址）和写入过程中的 `.tmp`。`.tmp` 不当缓存读。校验器缺失或与正文摘要不一致时，正文仍可离线使用；下一次显式 XML 刷新才是无条件 GET。同一磁盘路径一旦被另一个地址占用（`Apps/x.xml` 与 `apps/x.xml` 在 Windows 上就是这种情况），正文既不会被误读，也不会被覆盖——即使 `.etag` 被删掉，`.uri` 仍保留归属。`SchemaVersion` 与 `MetadataSchema.IsCompatible` 不一致时不覆盖已有正文。
 
 只接受静态发布文件树：带查询串、含跳转段或空段、含编码的斜杠/反斜杠、Windows 保留设备名、结尾空格或点、正文文件名带 `.etag`/`.tmp`/`.uri` 后缀、带用户信息或非 DNS/IPv4 主机的地址，以及会占用保留名（`origin.json`、`.sources`）的主发布基相对路径，都在写入前直接抛出 `ArgumentException`。本地路径与 `file://` 开发入口和线上地址走同一套映射；主发布基绑定写不进磁盘时直接失败，不会在没有绑定文件的情况下继续写正文。
 
@@ -107,12 +107,24 @@ var client = new MetadataClient(cacheDirectory, TimeSpan.FromSeconds(30));
 var root = await client.RefreshRootAsync(metadataUrl, cancellationToken);
 var leafUri = MetadataResourceUri.Resolve(root.OriginUri!.AbsoluteUri, relativeSource);
 var leaf = await client.GetLeafAsync(root, version, leafUri, cancellationToken);
+var cachedLeaf = await client.GetCachedLeafAsync(root, version, leafUri, cancellationToken);
 var retried = await client.RefreshLeafAsync(root, version, leafUri, cancellationToken);
-await client.PreloadLeavesAsync(root, cancellationToken);
+var leaves = await client.PreloadLeavesAsync(root, cancellationToken); // Total / Loaded / Failed
 var offline = await client.OpenSnapshotAsync(metadataUrl, cancellationToken);
+var image = await client.GetImageAsync(root, imageId, cancellationToken);
+var refreshedImage = await client.RefreshImageAsync(root, imageId, cancellationToken);
+var revision = client.ImageRevision(root, imageId);
 ```
 
 `OpenSnapshotAsync` 只读磁盘，状态是 `Stale` 或 `Unavailable`，不会是 `Fresh`。`RefreshRootAsync` 对 http(s) 做条件 GET，对 file:// 和本地路径读取源文件，成功才是 `Fresh`。`ApplicationEntry.ResolveUpdaterEndpoint(originUri)` 取第一个直接子级 `UpdateKind`，再在它的直接子级里等值匹配 `Current`。
+
+`GetCachedLeafAsync` 是普通展示用的只读投影：只取这份快照当时已有的内存或有效磁盘叶子，不发 HTTP，也不等待别人正在进行的请求。缺失返回 `Unavailable`。它不会把结果标成 `Fresh`。`GetLeafAsync` 和 `RefreshLeafAsync` 仍按原语义读取或强制刷新。关闭磁盘缓存时，file:// 每次读取当前源文件并返回 `Stale`，不落盘、也不加读取间隔；http(s) 在这个模式下仍不主动请求。
+
+`PreloadLeavesAsync` 返回 `LeafPreloadSummary`，统计叶子总数、可用文档数和缺失文档数；HTTP、超时或解析失败不能再被调用方误报为全部完成。已有缓存回退仍算可用文档，不代表本轮联网确认成功。`HasCachedImage(root, imageId)` 只检查可用磁盘缓存，不发网络请求，宿主可用它在 XML 刷新期间延后冷图片读取。
+
+已登记图片使用同一条传输和同一套磁盘布局，不另建目录。`GetImageAsync` 在磁盘正文完整时直接返回，不发 HTTP，也不做后台校验。冷缓存只共享一次下载；失败后十分钟内普通读取不再请求。缓存写不进去时返回错误并进入同样的抑制，不把这次下载假装成已缓存成功。`RefreshImageAsync` 不受这十分钟限制，与冷下载共享同一 URI 的在途请求，并发送条件请求。首次可展示，或正文被不同字节替换，才触发一次 `ImageUpdated`；304 或字节未变不通知。回调里再读同一张图命中刚提交的缓存，不会另开传输。刷新失败且仍有旧图时保留旧字节，`Error` 说明本次失败。调用方取消只取消等待，`Dispose` 才取消共享传输。
+
+`ImageRevision` 供宿主把登记 ID 编进虚拟地址。它使用旁挂摘要，不在列清单时重读图片正文。已登记图片返回规范化 URI 与该摘要的稳定混合值：Source 或摘要变化后这个值会变，从而减少网页复用旧图。混合结果只有 32 位，碰撞时仍可能得到相同地址，不能当成绝无复用的证明。登记无法解析时返回 0。Markdown 正文里没有登记成 `Image` 的内嵌图片不重写、不缓存，也不进入这套版本。禁用磁盘缓存时，图片每次读取当前来源，不做十分钟抑制，也不发条件请求。
 
 核心编译打包命令（供贡献者、CI 机器人或桌面端本地调试调用）：
 
@@ -169,8 +181,8 @@ MetadataBuilder.Build(sourceDir, outputDir, schemaVersion: MetadataSchema.Curren
 | 模型元素 | 所在 XML 位置 | 属性与功能说明 |
 |---|---|---|
 | `SchemaVersion` / `ContentRevision` | 根节点属性 | 数据协议大版本号 / 构建注入的 Git 提交修订号 |
-| `Application` | 根的子元素 | 应用程序实体：包含 `@ID`、当前版本 `Version`、多语言显示名 `DisplayName`（必须同时写 `zh-CN` 与 `en-US` 两条）、可选布尔开关 `TransferAd`（缺省视为关闭，客户端据此决定是否自动弹出迁移提示窗）、版本包列表 `Packages`、自己的新闻 `Posts`。显示名与新闻都不从 Base 继承，也不使用顶层公共列表 |
-| `Mod` | 根的子元素 | 模组实体：包含 `@ID`、当前推荐版本 `CurrentVersion`、图标 `Icon`（引用图片 ID）、多语言显示名 `DisplayName`（必须同时写 `zh-CN` 与 `en-US` 两条）、外观样式 `Style`、版本列表 `Packages`、自己的公告 `Posts`、可选友情链接 `Links`。显示名与 Posts／Links 一样属于实体自身，不从 Base 继承 |
+| `Application` | 根的子元素 | 应用程序实体：包含 `@ID`、当前版本 `Version`、多语言显示名 `DisplayName`（必须同时写 `zh` 与 `en` 两条）、可选布尔开关 `TransferAd`（缺省视为关闭，客户端据此决定是否自动弹出迁移提示窗）、版本包列表 `Packages`、自己的新闻 `Posts`。显示名与新闻都不从 Base 继承，也不使用顶层公共列表 |
+| `Mod` | 根的子元素 | 模组实体：包含 `@ID`、当前推荐版本 `CurrentVersion`、图标 `Icon`（引用图片 ID）、多语言显示名 `DisplayName`（必须同时写 `zh` 与 `en` 两条）、外观样式 `Style`、版本列表 `Packages`、自己的公告 `Posts`、可选友情链接 `Links`。显示名与 Posts／Links 一样属于实体自身，不从 Base 继承 |
 | `Package` | 实体子元素 | 纯安装数据：必填版本号 `@Version`、可选发布日期 `ReleaseDate`、可选独立清单 `Manifest`。不再包含更新日志；可以没有任何新闻 |
 | `Post` | Mod 或 Application 的直接子元素 | 独立新闻：发布时间 `@DateTime`、多语言标题 `Titles`、可选多语言介绍 `Descriptions`、可选封面图 `HeadImage`（已登记图片 ID）、正文 Markdown 引用 `Contents`。不关联版本包，不加外跳链接；介绍省略时不从 Markdown 截取 |
 | `Link` | 仅 Mod 的直接子元素 | 友情链接：必填 `@Url`（仅 HTTP／HTTPS）、可选 `@Languages`、可选图标短 ID `Icon`、至少一条 `DisplayName`。顺序即展示顺序 |
@@ -178,11 +190,15 @@ MetadataBuilder.Build(sourceDir, outputDir, schemaVersion: MetadataSchema.Curren
 
 ### 显示名（Mod 与 Application 均必填）
 
-`Mod` 与 `Application` 都通过重复的 `<DisplayName Language="…">文本</DisplayName>` 声明显示名，`Language` 不能为空白，同一个实体内的完整语言标签不区分大小写且不能重复。构建期要求**必须各写一条 `zh-CN` 与 `en-US`**（完整语言标签精确匹配，比较不区分大小写），文本不能为空，可以再补充其它语言；缺失、空白或标签重复都会让核心构建直接失败。
+`Mod` 与 `Application` 都通过重复的 `<DisplayName Language="…">文本</DisplayName>` 声明显示名，`Language` 不能为空白，同一个实体内的完整语言标签不区分大小写且不能重复。构建期要求**必须各写一条 `zh` 与 `en`**（完整语言标签精确匹配，比较不区分大小写），文本不能为空，可以再补充其它语言；缺失、空白或标签重复都会让核心构建直接失败。
+
+项目中的中文与英文标签统一为 `zh` 与 `en`：实体显示名、新闻标题／简介／正文、友情链接和清单加载条件使用同一写法。`zh-CN` 与 `en-US` 不能代替实体必填的 `zh`／`en`，构建器与解析库不会自动重写语言标签。Desktop 的设置、网页桥接与元数据查询同步使用 `zh`／`en`；操作系统区域语言只用于识别界面语言。元数据协议版本仍为 `1.0`。
+
+查询侧的语言比较统一走解析库的 `LanguageTag.Matches` / `LanguageTag.Select`（库只提供比较，不改写节点里的标签原文）：数据侧只写 `zh` / `en`，查询带地区时归到语言族再比（`zh-CN` / `zh-TW` 都按 `zh` 查，`en-US` 按 `en` 查），不带地区的查询只精确匹配；比较不区分大小写，`en` 不会匹配到 `english`。反过来不做：查询 `zh` 不会命中数据里的 `zh-CN`。
 
 显示名是实体自身的字段，**不从 Base 继承**：子实体合并 Base 时只保留自己声明的全部 `DisplayName`，Base 里不可能、也不会提供显示名。这一点与 `UpdateKind@DisplayName` 不同——更新线的显示名契约与读写代码保持不变，仍由客户端自行覆盖展示。
 
-完整属性列表、XML 示例与决定说明见 [Mod 与 Application 的必填显示名](.agents/notes/implemented/feature/2026-10-05-required-displayname.md)。
+显示名的原始设计见 [Mod 与 Application 的必填显示名](.agents/notes/implemented/feature/2026-10-05-required-displayname.md)；语言标签以本节为准。
 
 ### Mod 页面样式
 
@@ -207,9 +223,9 @@ XML 使用 PascalCase，Vue 对象使用 camelCase，CSS 属性使用 kebab-case
 
 **发布契约版本保持 `1.0`。** 本次仅调整 Style，不提高整个元数据的版本号，避免已有客户端因版本检查拒绝模组、应用包和更新信息。旧 `LaunchButton` / `Label` 及 Brush 字段已迁移，不保留别名；旧版八位颜色需标注 ARGB 或显式转换成 CSS。使用新样式仍需客户端读取对应字段，版本检查通过不代表已经支持新样式。
 
-**新增必填显示名后协议版本仍为 `1.0`。** Mod 与 Application 只是各自多了必填的 `DisplayName` 实体字段（`zh-CN` 与 `en-US` 各一条），`SchemaVersion` 不变；`UpdateKind@DisplayName` 的契约与读写代码保持不变，历史安装记录也照旧可读。
+**新增必填显示名后协议版本仍为 `1.0`。** Mod 与 Application 只是各自多了必填的 `DisplayName` 实体字段（`zh` 与 `en` 各一条），`SchemaVersion` 不变；`UpdateKind@DisplayName` 的契约与读写代码保持不变，历史安装记录也照旧可读。
 
-**协议版本仍是 `1.0`，但旧更新日志入口已删除。** `Package.Changelogs` 与 `ApplicationEntry.ChangelogSource` 不再受支持，不保留别名或空实现。各 Mod／Application 只读取自己的 `Posts`；外部链接由作者写进 Markdown。`Link@Languages` 缺省表示所有语言可见，比较不区分大小写：`zh`／`en` 匹配该语言族（如 `zh-CN`），`zh-CN` 只精确匹配 `zh-CN`，不会把 `en` 匹配到 `english`。名称优先取与当前语言精确匹配的 `DisplayName`，没有精确匹配时取 XML 中第一条，不按语言族自动回退。图标省略时由客户端使用通用外链图标。库只原样输出这些节点，不实现语言筛选。
+**协议版本仍是 `1.0`，但旧更新日志入口已删除。** `Package.Changelogs` 与 `ApplicationEntry.ChangelogSource` 不再受支持，不保留别名或空实现。各 Mod／Application 只读取自己的 `Posts`；外部链接由作者写进 Markdown。`Link@Languages` 缺省表示所有语言可见，比较走 `LanguageTag.Matches`，不区分大小写：查询下标 `zh` / `en` 与带地区的 `zh-CN` / `en-US` 都按语言族命中，不会把 `en` 匹配到 `english`。名称由客户端用 `LanguageTag.Select` 取该语言下的第一条。图标省略时由客户端使用通用外链图标。库只原样输出这些节点，不实现语言筛选。
 
 完整属性列表、XML 示例与决定说明见 [Mod 页面自定义样式](.agents/notes/implemented/feature/2026-10-04-mod-style.md)。
 
@@ -225,9 +241,10 @@ npm run deploy          # 编译打包并直接发布部署到 Cloudflare Pages 
 
 - **核心构建流程**（纯托管 C# 代码执行）：校验源数据 XSD → 将包含 Include 的树展平合并 → 自动替换宏变量 → 复制被引用的图片与文档资源 → 全面业务语义校验；最终输出的 `Output/` 目录里干净利落，只包含合并后的 `metadata.xml`、被引用的资源文件，以及 Cloudflare 的 `_redirects` 路由跳转规则；
 - **叶子独立清单处理**：`Manifest` 登记节点的源文件，与大总表入口一样会经过展平处理（移除多余 Include、替换完整 ID、解析宏变量）后再输出发布，客户端直接调 `MetadataBuilder.Load` 就能无缝读取；图片和 Markdown 则直接原样拷贝；
-- **图片转换模块（Imaging）**：只负责在发版阶段把大图片转成轻量的 WebP 格式并回传 MD5 哈希，它不打进面向客户端的 NuGet 主包里；只有在带 `--webp` 参数时才会对图片触发转换；
+- **图片转换模块（Imaging）**：只负责在发版阶段把大图片转成轻量的 WebP 格式，它不打进面向客户端的 NuGet 主包里；只有在带 `--webp` 参数时才会对图片触发转换；
 - **XSD 模式规范**：`Metadata/MetadataSchema.xsd` 负责约束作者编写的源数据；`Metadata/MetadataPublishSchema.xsd` 负责约束最终对外发布的产物；
-- **内置宏变量**：支持 `${TIMESTAMP}`、`${ENV:NAME}`、`${MD5:}` 等自动替换。
+- **内置宏变量**：支持 `${TIMESTAMP}`、`${ENV:NAME}` 等自动替换；
+- **哈希只属于清单与更新记录**：只有 Manifest 的 `File@Hash` / `Dependencies/Dll@Hash` 和 UpdateKind 的 `Updater@Hash` 带哈希（都由各自的生成方给出），Image 与 Markdown 不写 Hash，源 XSD 会直接拒绝。
 
 ## 自动化测试规范
 
